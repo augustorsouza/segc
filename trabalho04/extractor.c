@@ -37,6 +37,45 @@ char victim_ip[MAX_SIZE] = "";
 char victim_ethernet[MAX_SIZE] = "";
 char proto[MAX_SIZE] = "";
 char pcap_filename[MAX_SIZE] = "";
+pcap_t *pcap_descriptor;
+
+enum TRANSPORT_PROTOCOL { 
+    TCP, 
+    UDP 
+};
+
+int packet_count(enum TRANSPORT_PROTOCOL protocol) {
+    struct bpf_program fp;		    /* The compiled filter */
+    struct pcap_pkthdr *pkt_header;
+    const u_char *pkt_data;
+    char filter_exp[MAX_SIZE] = "";	/* The filter expression */
+    int count = 0;
+
+
+    /* Por exemplo: tcp && host 189.126.11.82 */
+    if (protocol == TCP)
+        strcat(filter_exp, "tcp ");
+    else if (protocol == UDP)        
+        strcat(filter_exp, "udp ");
+
+    strcat(filter_exp, "&& host ");
+    strcat(filter_exp, victim_ip);
+        
+	if (pcap_compile(pcap_descriptor, &fp, filter_exp, 0, 0) == -1) {
+		fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(pcap_descriptor));
+		return(2);
+	}
+	
+	if (pcap_setfilter(pcap_descriptor, &fp) == -1) {
+		fprintf(stderr, "Couldn't install filter %s: %s\n", filter_exp, pcap_geterr(pcap_descriptor));
+		return(2);
+	}
+	
+	while (pcap_next_ex(pcap_descriptor, &pkt_header, &pkt_data) == 1) 
+	    count++;
+	    
+    return count;
+}
 
 // funcao para mostrar padrao de execucao
 void show_usage_and_exit(void)
@@ -53,7 +92,8 @@ void show_usage_and_exit(void)
 int main(int argc, char *argv[])
 {
     int i=0;
-
+    char *ebuf;
+    
     /* Se o numero de paramestros passados não é o esperado, exibe mensagem de erro */    
     if (argc != PARAMETERS_NUMBER) 
         show_usage_and_exit();
@@ -74,7 +114,34 @@ int main(int argc, char *argv[])
     if ((!strcmp(victim_ip, "")) || (!strcmp(victim_ethernet, "")) || (!strcmp(proto, "")) || (!strcmp(pcap_filename, "")))
         show_usage_and_exit();
     
+    if ((pcap_descriptor = pcap_open_offline(pcap_filename, ebuf)) == NULL) {
+        printf("ERRO NA ABERTURA DO ARQUIVO PCAP %s: %s\n", pcap_filename, ebuf);
+        exit(8);
+    }
+
+
+//FIXME:Codigo para converter string de IP em um bpf_u_int32 (guardando aqui caso seja aplicavel...... deletar antes do envio!!!!    
+/*    j = 0; */
+/*    current_ip_group = 0;*/
+/*    for (i=0; i<strlen(victim_ip_string); i++) {*/
+/*        ip_group_str[j++] = victim_ip_string[i];*/
+/*        ip_group_str[j] = '\0';*/
+/*        if  ((victim_ip_string[i+1] == '.') || (i == strlen(victim_ip_string) - 1)){*/
+/*            victim_ip += atoi(ip_group_str) << 24 - 8*current_ip_group;*/
+/*            current_ip_group++;*/
+/*            i++;*/
+/*            j = 0;*/
+/*        }*/
+/*    }*/
+    
+
+    printf("quantidade de pacotes com protocolo de transporte TCP: %d\n", packet_count(TCP));
+    printf("quantidade de pacotes com protocolo de transporte UDP: %d\n", packet_count(UDP));
+    
+    /* Feche o arquivo pcap e termine a execução */
+    pcap_close(pcap_descriptor);
     return(0);
+
 }
 
 

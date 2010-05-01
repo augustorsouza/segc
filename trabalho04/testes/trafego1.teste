@@ -1,0 +1,10 @@
+./extractor --victim-ip 189.126.11.82 --victim-ethernet 00:0f:20:2f:63:d9 -proto smtp,pop3,ldap,http trafego1.pcap 
+SAIDA
+36
+0
+9
+0
+9
+0
+0
+
