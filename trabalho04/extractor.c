@@ -31,36 +31,46 @@ plataforma:
 /* constantes: */
 #define MAX_SIZE 256
 #define PARAMETERS_NUMBER 8
+#define ONLY_TCP_FILTER "tcp && host "
+#define ONLY_UDP_FILTER "udp && host "
+#define TCP_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && host "
+
+enum FILTER_TYPE { 
+    ONLY_TCP, 
+    ONLY_UDP,
+    TCP_SESSIONS
+};
 
 /* variaveis globais: */
 char victim_ip[MAX_SIZE] = "";
 char victim_ethernet[MAX_SIZE] = "";
 char proto[MAX_SIZE] = "";
 char pcap_filename[MAX_SIZE] = "";
-pcap_t *pcap_descriptor;
+pcap_t *pcap_descriptor = NULL;
 
-enum TRANSPORT_PROTOCOL { 
-    TCP, 
-    UDP 
-};
-
-int packet_count(enum TRANSPORT_PROTOCOL protocol) {
+int packet_count(enum FILTER_TYPE filter) {
     struct bpf_program fp;		    /* The compiled filter */
     struct pcap_pkthdr *pkt_header;
     const u_char *pkt_data;
     char filter_exp[MAX_SIZE] = "";	/* The filter expression */
     int count = 0;
 
+    switch (filter) {
+        case ONLY_TCP:
+            strcat(filter_exp, ONLY_TCP_FILTER);
+        break;
+        case ONLY_UDP:
+            strcat(filter_exp, ONLY_UDP_FILTER);
+        break;
+        case TCP_SESSIONS:
+            strcat(filter_exp, TCP_SESSIONS_FILTER);
+        break;
+    }
 
-    /* Por exemplo: tcp && host 189.126.11.82 */
-    if (protocol == TCP)
-        strcat(filter_exp, "tcp ");
-    else if (protocol == UDP)        
-        strcat(filter_exp, "udp ");
-
-    strcat(filter_exp, "&& host ");
     strcat(filter_exp, victim_ip);
-        
+    
+    printf("%s\n", filter_exp);
+      
 	if (pcap_compile(pcap_descriptor, &fp, filter_exp, 0, 0) == -1) {
 		fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(pcap_descriptor));
 		return(2);
@@ -73,8 +83,22 @@ int packet_count(enum TRANSPORT_PROTOCOL protocol) {
 	
 	while (pcap_next_ex(pcap_descriptor, &pkt_header, &pkt_data) == 1) 
 	    count++;
-	    
+   
     return count;
+}
+
+void open_or_reload_pcap_file() {
+    char *ebuf;
+    
+    /* Se o arquivo já estiver aberto, então o fecharemos */
+    if (pcap_descriptor != NULL)
+        pcap_close(pcap_descriptor);
+
+    /* Abre o arquivo pcap_filename com checagem de erros */        
+    if ((pcap_descriptor = pcap_open_offline(pcap_filename, ebuf)) == NULL) {
+        printf("ERRO NA REABERTURA DO ARQUIVO PCAP %s: %s\n", pcap_filename, ebuf);
+        exit(8);
+    }
 }
 
 // funcao para mostrar padrao de execucao
@@ -92,7 +116,6 @@ void show_usage_and_exit(void)
 int main(int argc, char *argv[])
 {
     int i=0;
-    char *ebuf;
     
     /* Se o numero de paramestros passados não é o esperado, exibe mensagem de erro */    
     if (argc != PARAMETERS_NUMBER) 
@@ -114,12 +137,6 @@ int main(int argc, char *argv[])
     if ((!strcmp(victim_ip, "")) || (!strcmp(victim_ethernet, "")) || (!strcmp(proto, "")) || (!strcmp(pcap_filename, "")))
         show_usage_and_exit();
     
-    if ((pcap_descriptor = pcap_open_offline(pcap_filename, ebuf)) == NULL) {
-        printf("ERRO NA ABERTURA DO ARQUIVO PCAP %s: %s\n", pcap_filename, ebuf);
-        exit(8);
-    }
-
-
 //FIXME:Codigo para converter string de IP em um bpf_u_int32 (guardando aqui caso seja aplicavel...... deletar antes do envio!!!!    
 /*    j = 0; */
 /*    current_ip_group = 0;*/
@@ -134,14 +151,20 @@ int main(int argc, char *argv[])
 /*        }*/
 /*    }*/
     
-
-    printf("quantidade de pacotes com protocolo de transporte TCP: %d\n", packet_count(TCP));
-    printf("quantidade de pacotes com protocolo de transporte UDP: %d\n", packet_count(UDP));
+    open_or_reload_pcap_file();
+    printf("quantidade de pacotes com protocolo de transporte TCP: %d\n", packet_count(ONLY_TCP));
     
-    /* Feche o arquivo pcap e termine a execução */
+    open_or_reload_pcap_file();
+    printf("quantidade de pacotes com protocolo de transporte UDP: %d\n", packet_count(ONLY_UDP));
+    
+    open_or_reload_pcap_file();
+    printf("quantidade de sessões TCP: %d\n", packet_count(TCP_SESSIONS));
+
+    open_or_reload_pcap_file();
+    
+    /* Feche o arquivo e termine a execução */
     pcap_close(pcap_descriptor);
     return(0);
-
 }
 
 
