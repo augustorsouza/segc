@@ -35,6 +35,17 @@ plataforma:
 #define ONLY_UDP_FILTER "udp && host "
 #define TCP_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && host "
 
+#define SUPPORTED_PROTOCOLS_QUANTITY 7
+char const * const SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[] = {
+    "ftp",
+    "ssh",
+    "telnet",
+    "smtp",
+    "http",
+    "pop3",
+    "ldap"
+};
+
 enum FILTER_TYPE { 
     ONLY_TCP, 
     ONLY_UDP,
@@ -137,20 +148,6 @@ int main(int argc, char *argv[])
     if ((!strcmp(victim_ip, "")) || (!strcmp(victim_ethernet, "")) || (!strcmp(proto, "")) || (!strcmp(pcap_filename, "")))
         show_usage_and_exit();
     
-//FIXME:Codigo para converter string de IP em um bpf_u_int32 (guardando aqui caso seja aplicavel...... deletar antes do envio!!!!    
-/*    j = 0; */
-/*    current_ip_group = 0;*/
-/*    for (i=0; i<strlen(victim_ip_string); i++) {*/
-/*        ip_group_str[j++] = victim_ip_string[i];*/
-/*        ip_group_str[j] = '\0';*/
-/*        if  ((victim_ip_string[i+1] == '.') || (i == strlen(victim_ip_string) - 1)){*/
-/*            victim_ip += atoi(ip_group_str) << 24 - 8*current_ip_group;*/
-/*            current_ip_group++;*/
-/*            i++;*/
-/*            j = 0;*/
-/*        }*/
-/*    }*/
-    
     open_or_reload_pcap_file();
     printf("quantidade de pacotes com protocolo de transporte TCP: %d\n", packet_count(ONLY_TCP));
     
@@ -161,6 +158,13 @@ int main(int argc, char *argv[])
     printf("quantidade de sessões TCP: %d\n", packet_count(TCP_SESSIONS));
 
     open_or_reload_pcap_file();
+    
+    for (i=0; i<SUPPORTED_PROTOCOLS_QUANTITY; i++) {
+        char *tmp = NULL;
+        tmp = strstr(proto, SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[i]);
+        if (tmp != NULL)
+            printf("%s foi encontrado nos parametros\n",SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[i]);
+    }
     
     /* Feche o arquivo e termine a execução */
     pcap_close(pcap_descriptor);
