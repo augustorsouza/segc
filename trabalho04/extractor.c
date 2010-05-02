@@ -25,19 +25,21 @@ plataforma:
 /* Constantes: */
 #define MAX_SIZE 256
 #define PARAMETERS_NUMBER 8
-#define ONLY_TCP_FILTER "tcp && host "
-#define ONLY_UDP_FILTER "udp && host "
-#define TCP_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && host "
-#define APPLICATION_PROTOCOL_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && port "
+
+#define ONLY_TCP_FILTER "tcp && host " // filtro para contar pacotes tcp
+#define ONLY_UDP_FILTER "udp && host " // filtro para contar pacotes udp
+#define TCP_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && host " // filtro para contar sessões tcp
+#define APPLICATION_PROTOCOL_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && port " // filtro para contar sessões tcp de um determinado protocolo de aplicação
+
 #define SUPPORTED_PROTOCOLS_QUANTITY 7
 char const * const SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[] = {
-    "ftp",
-    "ssh",
-    "telnet",
-    "smtp",
-    "http",
-    "pop3",
-    "ldap"
+    "ftp",      // 21
+    "ssh",      // 22
+    "telnet",   // 23
+    "smtp",     // 25
+    "http",     // 80
+    "pop3",     // 110
+    "ldap"      // 389
 };
 
 /* Numeradores */
@@ -58,10 +60,10 @@ pcap_t *pcap_descriptor = NULL;
 /* Função para contar o número de pacotes de acordo com um determinado filtro */
 int packet_count(enum FILTER_TYPE filter, char *protocol) {
     struct bpf_program fp;		    // filtro compilado
-    struct pcap_pkthdr *pkt_header;
-    const u_char *pkt_data;
-    char filter_exp[MAX_SIZE] = "";	// expressao para descrever o filtro
-    int count = 0;
+    struct pcap_pkthdr *pkt_header; // cabeçalho de um determinado pacote, informação que não utilizaremos
+    const u_char *pkt_data;         // dados de um determinado pacote, informação que não utilizaremos
+    char filter_exp[MAX_SIZE] = "";	// expressão para descrever o filtro
+    int count = 0;                  // contador de pacotes
 
     switch (filter) {
         case ONLY_TCP:
@@ -85,15 +87,16 @@ int packet_count(enum FILTER_TYPE filter, char *protocol) {
     }
 
 	if (pcap_compile(pcap_descriptor, &fp, filter_exp, 0, 0) == -1) {
-		fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(pcap_descriptor));
-		return(2);
+		fprintf(stderr, "Não foi possível interpretar o filtro %s: %s\n", filter_exp, pcap_geterr(pcap_descriptor));
+		exit(8);
 	}
 	
 	if (pcap_setfilter(pcap_descriptor, &fp) == -1) {
-		fprintf(stderr, "Couldn't install filter %s: %s\n", filter_exp, pcap_geterr(pcap_descriptor));
-		return(2);
+		fprintf(stderr, "Não foi possível interpretar o filtro %s: %s\n", filter_exp, pcap_geterr(pcap_descriptor));
+		exit(8);
 	}
 	
+	/* Após aplicado o filtro basta contar a quantidade de pacotes no descriptor */
 	while (pcap_next_ex(pcap_descriptor, &pkt_header, &pkt_data) == 1) 
 	    count++;
    
