@@ -1,40 +1,34 @@
 /**
-autores: 
+Autores: 
     Augusto Rodrigues de Souza - ra031357 - augustorsouza@gmail.com
     Leonardo Maia Barbosa - ra107213 - leomaia_eco@yahoo.com.br
 
-arquivo: 
-    wordharvest.c
-
-funcao: 
+Arquivo: 
+    extractor.c
 
 parametros:
-    -o     [opcional]   determina arquivo de saida
-           (ex: -o arquivo_de_saida.txt) (padrao: saida.txt)      
-           
-    -e     [opcional]   determina tipos de arquivos a serem analisados
-           separados por ":" (ex: -e txt:doc:xls) (padrao: txt)
-           
-    -d     [obrigatorio] determina o diretorio a ser analizado
-           (ex: -d /log/)
+    --victim_ip  = IP do host monitorado   
+    --victim-ethernet = MAC do host monitorado
+    -proto Protocolos de aplicação que serão monitorados
+    <arquivo pcap> Arquivo pcap do trafego a ser monitorado
            
 plataforma:
     linux
 */
 
-/* bibliotecas: */
+/* Bibliotecas: */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <pcap.h>
 
-/* constantes: */
+/* Constantes: */
 #define MAX_SIZE 256
 #define PARAMETERS_NUMBER 8
 #define ONLY_TCP_FILTER "tcp && host "
 #define ONLY_UDP_FILTER "udp && host "
 #define TCP_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && host "
-
+#define APPLICATION_PROTOCOL_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && port "
 #define SUPPORTED_PROTOCOLS_QUANTITY 7
 char const * const SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[] = {
     "ftp",
@@ -46,42 +40,50 @@ char const * const SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[] = {
     "ldap"
 };
 
+/* Numeradores */
 enum FILTER_TYPE { 
     ONLY_TCP, 
     ONLY_UDP,
-    TCP_SESSIONS
+    TCP_SESSIONS,
+    APPLICATION_PROTOCOL_SESSIONS
 };
 
-/* variaveis globais: */
+/* Variáveis globais: */
 char victim_ip[MAX_SIZE] = "";
 char victim_ethernet[MAX_SIZE] = "";
 char proto[MAX_SIZE] = "";
 char pcap_filename[MAX_SIZE] = "";
 pcap_t *pcap_descriptor = NULL;
 
-int packet_count(enum FILTER_TYPE filter) {
-    struct bpf_program fp;		    /* The compiled filter */
+/* Função para contar o número de pacotes de acordo com um determinado filtro */
+int packet_count(enum FILTER_TYPE filter, char *protocol) {
+    struct bpf_program fp;		    // filtro compilado
     struct pcap_pkthdr *pkt_header;
     const u_char *pkt_data;
-    char filter_exp[MAX_SIZE] = "";	/* The filter expression */
+    char filter_exp[MAX_SIZE] = "";	// expressao para descrever o filtro
     int count = 0;
 
     switch (filter) {
         case ONLY_TCP:
             strcat(filter_exp, ONLY_TCP_FILTER);
+            strcat(filter_exp, victim_ip);
         break;
         case ONLY_UDP:
             strcat(filter_exp, ONLY_UDP_FILTER);
+            strcat(filter_exp, victim_ip);
         break;
         case TCP_SESSIONS:
             strcat(filter_exp, TCP_SESSIONS_FILTER);
+            strcat(filter_exp, victim_ip);
+        break;
+        case APPLICATION_PROTOCOL_SESSIONS:
+            strcat(filter_exp, APPLICATION_PROTOCOL_SESSIONS_FILTER);
+            strcat(filter_exp, protocol);
+            strcat(filter_exp, "&& host ");
+            strcat(filter_exp, victim_ip);
         break;
     }
 
-    strcat(filter_exp, victim_ip);
-    
-    printf("%s\n", filter_exp);
-      
 	if (pcap_compile(pcap_descriptor, &fp, filter_exp, 0, 0) == -1) {
 		fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(pcap_descriptor));
 		return(2);
@@ -98,6 +100,7 @@ int packet_count(enum FILTER_TYPE filter) {
     return count;
 }
 
+/* Função para abrir (caso ainda não tenha sido aberto) ou reabrir arquivo pcap */
 void open_or_reload_pcap_file() {
     char *ebuf;
     
@@ -112,7 +115,7 @@ void open_or_reload_pcap_file() {
     }
 }
 
-// funcao para mostrar padrao de execucao
+/* Função para mostrar padrao de execucao */
 void show_usage_and_exit(void)
 {
 	printf("Padrao de utilizacao:\n");
@@ -124,14 +127,15 @@ void show_usage_and_exit(void)
 	exit(8);
 }
 
-int main(int argc, char *argv[])
-{
-    int i=0;
+/* Função main */
+int main(int argc, char *argv[]) {
+    int i=0; // contador auxiliar
     
     /* Se o numero de paramestros passados não é o esperado, exibe mensagem de erro */    
     if (argc != PARAMETERS_NUMBER) 
         show_usage_and_exit();
     
+    /* Extrai parametros */
     for(i=1; i<argc; i=i+2) {
         if (!strcmp(argv[i], "--victim-ip"))
             strcpy(victim_ip, argv[i+1]);
@@ -148,29 +152,30 @@ int main(int argc, char *argv[])
     if ((!strcmp(victim_ip, "")) || (!strcmp(victim_ethernet, "")) || (!strcmp(proto, "")) || (!strcmp(pcap_filename, "")))
         show_usage_and_exit();
     
+    /* Imprime quantidade de pacotes tcp */
     open_or_reload_pcap_file();
-    printf("quantidade de pacotes com protocolo de transporte TCP: %d\n", packet_count(ONLY_TCP));
-    
-    open_or_reload_pcap_file();
-    printf("quantidade de pacotes com protocolo de transporte UDP: %d\n", packet_count(ONLY_UDP));
-    
-    open_or_reload_pcap_file();
-    printf("quantidade de sessões TCP: %d\n", packet_count(TCP_SESSIONS));
+    printf("%d\n", packet_count(ONLY_TCP, NULL));
 
+    /* Imprime quantidade de pacotes udp */    
     open_or_reload_pcap_file();
-    
+    printf("%d\n", packet_count(ONLY_UDP, NULL));
+
+    /* Imprime quantidade de pacotes sessões tcp */        
+    open_or_reload_pcap_file();
+    printf("%d\n", packet_count(TCP_SESSIONS, NULL));
+
+    /* Imprime para cada protocolo de aplicação passado como parametro a quantidade de sessões tcp */    
     for (i=0; i<SUPPORTED_PROTOCOLS_QUANTITY; i++) {
         char *tmp = NULL;
         tmp = strstr(proto, SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[i]);
-        if (tmp != NULL)
-            printf("%s foi encontrado nos parametros\n",SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[i]);
+        if (tmp != NULL) {
+            open_or_reload_pcap_file();
+            printf("%d\n", packet_count(APPLICATION_PROTOCOL_SESSIONS, (char*)SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[i]));
+        }
     }
     
     /* Feche o arquivo e termine a execução */
     pcap_close(pcap_descriptor);
     return(0);
 }
-
-
-
 
