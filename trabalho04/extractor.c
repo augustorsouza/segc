@@ -21,26 +21,17 @@ plataforma:
 #include <stdio.h>
 #include <string.h>
 #include <pcap.h>
+#include <netdb.h>
 
 /* Constantes: */
 #define MAX_SIZE 256
 #define PARAMETERS_NUMBER 8
+#define MAX_PROTOCOLS_NUMBER 128
 
 #define ONLY_TCP_FILTER "tcp && host " // filtro para contar pacotes tcp
 #define ONLY_UDP_FILTER "udp && host " // filtro para contar pacotes udp
 #define TCP_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && host " // filtro para contar sessões tcp
 #define APPLICATION_PROTOCOL_SESSIONS_FILTER "(tcp[tcpflags] & tcp-syn) != 0 && (tcp[tcpflags] & tcp-ack) == 0 && port " // filtro para contar sessões tcp de um determinado protocolo de aplicação
-
-#define SUPPORTED_PROTOCOLS_QUANTITY 7
-char const * const SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[] = {
-    "ftp",      // 21
-    "ssh",      // 22
-    "telnet",   // 23
-    "smtp",     // 25
-    "http",     // 80
-    "pop3",     // 110
-    "ldap"      // 389
-};
 
 /* Numeradores */
 enum FILTER_TYPE { 
@@ -56,6 +47,8 @@ char victim_ethernet[MAX_SIZE] = "";
 char proto[MAX_SIZE] = "";
 char pcap_filename[MAX_SIZE] = "";
 pcap_t *pcap_descriptor = NULL;
+char protocols[MAX_PROTOCOLS_NUMBER][MAX_SIZE];
+int protocols_quantity;
 
 /* Função para contar o número de pacotes de acordo com um determinado filtro */
 int packet_count(enum FILTER_TYPE filter, char *protocol) {
@@ -118,6 +111,23 @@ void open_or_reload_pcap_file() {
     }
 }
 
+/* Função auxiliar para a função do quicksort do C. Utilizada para ordenar os protocolos segundo o seus numeros de porta. */
+int compare_port_numbers(x, y)
+void *x, *y; 
+{
+    int port_x, port_y;
+    
+    port_x = ntohs((*getservbyname((char*)x, "tcp")).s_port);
+    port_y = ntohs((*getservbyname((char*)y, "tcp")).s_port);
+
+    if (port_x > port_y)
+        return 1;
+    else if (port_x == port_y)
+        return 0;
+    else if (port_x < port_y)
+        return -1;
+}
+
 /* Função para mostrar padrao de execucao */
 void show_usage_and_exit(void)
 {
@@ -167,14 +177,25 @@ int main(int argc, char *argv[]) {
     open_or_reload_pcap_file();
     printf("%d\n", packet_count(TCP_SESSIONS, NULL));
 
+    /* Monta array de string com os protocolos de aplicação e os ordena pelo numero da porta */
+    char delims[] = ",";
+    char *result = NULL;
+    result = strtok(proto, delims);
+    i = 0;
+    while( result != NULL ) {
+        strcpy(protocols[i], result);
+        i++;
+        result = strtok(NULL, delims);
+    }
+
+    protocols_quantity = i;
+
+    qsort(protocols, (size_t)protocols_quantity, sizeof(char)*MAX_SIZE, compare_port_numbers);
+
     /* Imprime para cada protocolo de aplicação passado como parametro a quantidade de sessões tcp */    
-    for (i=0; i<SUPPORTED_PROTOCOLS_QUANTITY; i++) {
-        char *tmp = NULL;
-        tmp = strstr(proto, SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[i]);
-        if (tmp != NULL) {
-            open_or_reload_pcap_file();
-            printf("%d\n", packet_count(APPLICATION_PROTOCOL_SESSIONS, (char*)SUPPORTED_PROTOCOLS_ORDERED_BY_PORT_NUMBER[i]));
-        }
+    for (i=0; i<protocols_quantity; i++) {
+        open_or_reload_pcap_file();
+        printf("%d\n", packet_count(APPLICATION_PROTOCOL_SESSIONS, (char*)protocols[i]));
     }
     
     /* Feche o arquivo e termine a execução */
