@@ -27,6 +27,7 @@ plataforma:
 #define MAX_SIZE 256
 #define PARAMETERS_NUMBER 7
 #define ONLY_DNS_FILTER "udp port 53" // filtro para obter apenas requisições DNS
+#define DNS_HEADER_SIZE_IN_BYTES 12
 
 /***************************************************************************/
 /* INICIO de trecho de código extraido de http://www.tcpdump.org/pcap.htm  */
@@ -124,27 +125,46 @@ void start_sniffing_interface_for_dns_traffic(void) {
 	}
 }
 
+/* Função para extrair o campo "query name" do pacote dns. O resultado é armazenado em qname[]. */
+void get_dns_domain_in_query(u_char *query, char qname[]) {
+    int i = 0, j = 0;
+    while (query[i] != 0x00) { 
+        for(j = i; j < i + (int)query[i]; j++) {
+            qname[j] = query[j+1];
+        }
+        qname[j] = '.';
+        i = j + 1;
+    }
+    qname[j] = '\0';
+}
+
 void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
-	const struct sniff_ethernet *ethernet; /* The ethernet header */
-	const struct sniff_ip *ip; /* The IP header */
-	const struct udphdr *udp; /* The UDP header */
-	u_int size_ip;
-	static int i = 1;
-	
-	printf("%d\n", i); i++;
-	
+	const struct sniff_ethernet *ethernet; // cabecalho ethernet
+	const struct sniff_ip *ip_hdr; // cabecalho ip
+    u_int size_ip;
+	const struct udphdr *udp; // cabecalho udp
+	u_char *dns_msg_start;
+	char dns_qname[MAX_SIZE];
+    
 	ethernet = (struct sniff_ethernet*)(packet);
-    ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
-    size_ip = IP_HL(ip)*4;
+    ip_hdr = (struct sniff_ip*)(packet + SIZE_ETHERNET);
+    size_ip = IP_HL(ip_hdr)*4;
 	if (size_ip < 20) {
 		printf("Cabeçalho ip de tamanho invalido: %u bytes\n", size_ip);
 		return;
 	}
-    udp = (struct udphdr*)(packet + SIZE_ETHERNET + size_ip);
-
-    printf("mac addr %s\n", (char*)ether_ntoa(ethernet->ether_shost));
-    printf("ip addr %s\n",  inet_ntoa(ip->ip_src));
     
+    udp = (struct udphdr*)(packet + SIZE_ETHERNET + size_ip);
+    
+    dns_msg_start = (u_char*)(packet + SIZE_ETHERNET + size_ip + sizeof(struct udphdr) + DNS_HEADER_SIZE_IN_BYTES);
+    get_dns_domain_in_query(dns_msg_start, dns_qname);
+    
+    if (!strcmp(requisition, dns_qname)) {
+        printf("**************************************************************************************************\n");    
+        printf("O host %s fez uma requisição a %s\n", inet_ntoa(ip_hdr->ip_src), dns_qname);
+        printf("Resta responder o requisitante (MAC %s; IP %s; porta udp 0x%x;) dizendo que o host requisitado está no ip %s\n", (char*)ether_ntoa(ethernet->ether_shost), inet_ntoa(ip_hdr->ip_src), udp->uh_sport, ip);
+    }
+    return;    
 }
 
 /* Função main */
