@@ -20,15 +20,75 @@ plataforma:
 #include <stdio.h>
 #include <string.h>
 #include <pcap.h>
+#include <netinet/if_ether.h>
+#include <arpa/inet.h>
 
 /* Constantes: */
 #define MAX_SIZE 256
 #define PARAMETERS_NUMBER 7
+#define ONLY_DNS_FILTER "udp port 53" // filtro para obter apenas requisições DNS
+
+/***************************************************************************/
+/* INICIO de trecho de código extraido de http://www.tcpdump.org/pcap.htm  */
+
+/* Ethernet headers are always exactly 14 bytes */
+#define SIZE_ETHERNET 14
+
+/* Ethernet addresses are 6 bytes */
+//#define ETHER_ADDR_LEN	6
+
+/* Ethernet header */
+struct sniff_ethernet {
+	u_char ether_dhost[ETHER_ADDR_LEN]; /* Destination host address */
+	u_char ether_shost[ETHER_ADDR_LEN]; /* Source host address */
+	u_short ether_type; /* IP? ARP? RARP? etc */
+};
+
+/* IP header */
+struct sniff_ip {
+	u_char ip_vhl;		/* version << 4 | header length >> 2 */
+	u_char ip_tos;		/* type of service */
+	u_short ip_len;		/* total length */
+	u_short ip_id;		/* identification */
+	u_short ip_off;		/* fragment offset field */
+#define IP_RF 0x8000		/* reserved fragment flag */
+#define IP_DF 0x4000		/* dont fragment flag */
+#define IP_MF 0x2000		/* more fragments flag */
+#define IP_OFFMASK 0x1fff	/* mask for fragmenting bits */
+	u_char ip_ttl;		/* time to live */
+	u_char ip_p;		/* protocol */
+	u_short ip_sum;		/* checksum */
+	struct in_addr ip_src,ip_dst; /* source and dest address */
+};
+
+#define IP_HL(ip)		(((ip)->ip_vhl) & 0x0f)
+#define IP_V(ip)		(((ip)->ip_vhl) >> 4)
+
+/* TERMINO de trecho de código extraido de http://www.tcpdump.org/pcap.htm */
+/***************************************************************************/
+
+/***************************************************************************/
+/* INICIO de trecho de código extraido do código fonte do tcpdump          */
+
+/*
+ * Udp protocol header.
+ * Per RFC 768, September, 1981.
+ */
+struct udphdr {
+	u_int16_t	uh_sport;		/* source port */
+	u_int16_t	uh_dport;		/* destination port */
+	u_int16_t	uh_ulen;		/* udp length */
+	u_int16_t	uh_sum;			/* udp checksum */
+};
+
+/* TERMINO  de trecho de código extraido do código fonte do tcpdump        */
+/***************************************************************************/
 
 /* Variáveis globais: */
 char interface[MAX_SIZE] = "";
 char requisition[MAX_SIZE] = "";
 char ip[MAX_SIZE] = "";
+pcap_t *descriptor = NULL;
 
 /* Função para mostrar padrao de execucao */
 void show_usage_and_exit(void)
@@ -41,9 +101,61 @@ void show_usage_and_exit(void)
 	exit(8);
 }
 
+/* Função para abrir a interface em modo de procura por requisições DNS */
+void start_sniffing_interface_for_dns_traffic(void) {
+    struct bpf_program fp;
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    descriptor = pcap_open_live(interface, BUFSIZ, 0, -1, errbuf);
+
+    if(descriptor == NULL) { 
+        printf("Erro - pcap_open_live(): %s\n",errbuf); 
+        exit(8); 
+    }
+
+	if (pcap_compile(descriptor, &fp, ONLY_DNS_FILTER, 0, 0) == -1) {
+		fprintf(stderr, "Não foi possível interpretar o filtro %s: %s\n", ONLY_DNS_FILTER, pcap_geterr(descriptor));
+		exit(8);
+	}
+	
+	if (pcap_setfilter(descriptor, &fp) == -1) {
+		fprintf(stderr, "Não foi possível interpretar o filtro %s: %s\n", ONLY_DNS_FILTER, pcap_geterr(descriptor));
+		exit(8);
+	}
+}
+
+void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
+	const struct sniff_ethernet *ethernet; /* The ethernet header */
+	const struct sniff_ip *ip; /* The IP header */
+	const struct udphdr *udp; /* The UDP header */
+	u_int size_ip;
+	static int i = 1;
+	
+	printf("%d\n", i); i++;
+	
+	ethernet = (struct sniff_ethernet*)(packet);
+    ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
+    size_ip = IP_HL(ip)*4;
+	if (size_ip < 20) {
+		printf("Cabeçalho ip de tamanho invalido: %u bytes\n", size_ip);
+		return;
+	}
+    udp = (struct udphdr*)(packet + SIZE_ETHERNET + size_ip);
+
+    printf("mac addr %s\n", (char*)ether_ntoa(ethernet->ether_shost));
+    printf("ip addr %s\n",  inet_ntoa(ip->ip_src));
+    
+}
+
 /* Função main */
 int main(int argc, char *argv[]) {
     int i; // contador auxiliar
+
+    if (getuid()){
+        printf("Por favor, rode este programa como root\n");
+        return(1);
+    }
+
     /* Se o numero de paramestros passados não é o esperado, exibe mensagem de erro */    
     if (argc != PARAMETERS_NUMBER) 
         show_usage_and_exit();
@@ -62,6 +174,11 @@ int main(int argc, char *argv[]) {
     if ((!strcmp(interface, "")) || (!strcmp(requisition, "")) || (!strcmp(ip, "")))
         show_usage_and_exit();
 
+    /* Inicio do sniffing da interface por requisições DNS */
+    start_sniffing_interface_for_dns_traffic();
+    
+    pcap_loop(descriptor, -1, process_dns_packet_callback, NULL);
+    
     return(0);
 }
 
