@@ -112,7 +112,7 @@ void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkth
     /* Caso de pacote TCP */
     else if (ip_hdr->ip_p == 6) {
         u_char tcp_data_offset;
-        tcp_data_offset = transport_hdr[12]; // O campo data offset é 13o. byte do cabeçalho tcp
+        tcp_data_offset = transport_hdr[12]; // O campo data offset é 13o. byte do cabeçalho tcp (tamanho do cabeçalho tcp)
         dns_msg_start = (u_char*)(packet + SIZE_ETHERNET + size_ip + tcp_data_offset + DNS_HEADER_SIZE_IN_BYTES);
     }
     
@@ -121,6 +121,10 @@ void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkth
     if (!strcmp(requisition, dns_qname)) {
         printf("**************************************************************************************************\n");    
         printf("O host %s fez uma requisição a %s\n", inet_ntoa(ip_hdr->ip_src), dns_qname);
+        if (ip_hdr->ip_p == 17)
+            printf("A requisição foi feita via UDP\n");
+        else if (ip_hdr->ip_p == 6) 
+            printf("A requisição foi feita via TCP\n");
         printf("Resta responder o requisitante (MAC %s; IP %s; porta %d;) dizendo que o host requisitado está no ip %s\n", (char*)ether_ntoa(ethernet->ether_shost), inet_ntoa(ip_hdr->ip_src), source_port, ip);
     }
     return;    
