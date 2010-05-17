@@ -22,68 +22,15 @@ plataforma:
 #include <pcap.h>
 #include <netinet/if_ether.h>
 #include <arpa/inet.h>
+#include <netinet/ip.h>
 
 /* Constantes: */
 #define MAX_SIZE 256
 #define PARAMETERS_NUMBER 7
-#define ONLY_DNS_FILTER "udp port 53" // filtro para obter apenas requisições DNS
+#define ONLY_DNS_FILTER "tcp port 53 || udp port 53" // filtro para obter apenas requisições DNS
 #define DNS_HEADER_SIZE_IN_BYTES 12
-
-/***************************************************************************/
-/* INICIO de trecho de código extraido de http://www.tcpdump.org/pcap.htm  */
-
-/* Ethernet headers are always exactly 14 bytes */
+#define UDP_HEADER_SIZE_IN_BYTES 8
 #define SIZE_ETHERNET 14
-
-/* Ethernet addresses are 6 bytes */
-//#define ETHER_ADDR_LEN	6
-
-/* Ethernet header */
-struct sniff_ethernet {
-	u_char ether_dhost[ETHER_ADDR_LEN]; /* Destination host address */
-	u_char ether_shost[ETHER_ADDR_LEN]; /* Source host address */
-	u_short ether_type; /* IP? ARP? RARP? etc */
-};
-
-/* IP header */
-struct sniff_ip {
-	u_char ip_vhl;		/* version << 4 | header length >> 2 */
-	u_char ip_tos;		/* type of service */
-	u_short ip_len;		/* total length */
-	u_short ip_id;		/* identification */
-	u_short ip_off;		/* fragment offset field */
-#define IP_RF 0x8000		/* reserved fragment flag */
-#define IP_DF 0x4000		/* dont fragment flag */
-#define IP_MF 0x2000		/* more fragments flag */
-#define IP_OFFMASK 0x1fff	/* mask for fragmenting bits */
-	u_char ip_ttl;		/* time to live */
-	u_char ip_p;		/* protocol */
-	u_short ip_sum;		/* checksum */
-	struct in_addr ip_src,ip_dst; /* source and dest address */
-};
-
-#define IP_HL(ip)		(((ip)->ip_vhl) & 0x0f)
-#define IP_V(ip)		(((ip)->ip_vhl) >> 4)
-
-/* TERMINO de trecho de código extraido de http://www.tcpdump.org/pcap.htm */
-/***************************************************************************/
-
-/***************************************************************************/
-/* INICIO de trecho de código extraido do código fonte do tcpdump          */
-
-/*
- * Udp protocol header.
- * Per RFC 768, September, 1981.
- */
-struct udphdr {
-	u_int16_t	uh_sport;		/* source port */
-	u_int16_t	uh_dport;		/* destination port */
-	u_int16_t	uh_ulen;		/* udp length */
-	u_int16_t	uh_sum;			/* udp checksum */
-};
-
-/* TERMINO  de trecho de código extraido do código fonte do tcpdump        */
-/***************************************************************************/
 
 /* Variáveis globais: */
 char interface[MAX_SIZE] = "";
@@ -139,30 +86,42 @@ void get_dns_domain_in_query(u_char *query, char qname[]) {
 }
 
 void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
-	const struct sniff_ethernet *ethernet; // cabecalho ethernet
-	const struct sniff_ip *ip_hdr; // cabecalho ip
+	const struct ether_header *ethernet; // cabecalho ethernet
+	const struct ip *ip_hdr;             // cabecalho ip
     u_int size_ip;
-	const struct udphdr *udp; // cabecalho udp
+	u_char *transport_hdr; // cabecalho da camada de transporte (tcp ou udp)
 	u_char *dns_msg_start;
 	char dns_qname[MAX_SIZE];
+    u_int16_t source_port;
     
-	ethernet = (struct sniff_ethernet*)(packet);
-    ip_hdr = (struct sniff_ip*)(packet + SIZE_ETHERNET);
-    size_ip = IP_HL(ip_hdr)*4;
+	ethernet = (struct ether_header*)(packet);
+    ip_hdr = (struct ip*)(packet + SIZE_ETHERNET);
+    size_ip = (ip_hdr->ip_hl)*4;
 	if (size_ip < 20) {
 		printf("Cabeçalho ip de tamanho invalido: %u bytes\n", size_ip);
 		return;
 	}
+
+    transport_hdr = (u_char*)(packet + SIZE_ETHERNET + size_ip);
+    source_port = (((u_int16_t)transport_hdr[0] << 8 & 0xFF00) + (u_int16_t)transport_hdr[1] ) ;   
+
+    /* Caso de pacote UDP */
+    if (ip_hdr->ip_p == 17) {
+        dns_msg_start = (u_char*)(packet + SIZE_ETHERNET + size_ip + UDP_HEADER_SIZE_IN_BYTES + DNS_HEADER_SIZE_IN_BYTES);
+    }
+    /* Caso de pacote TCP */
+    else if (ip_hdr->ip_p == 6) {
+        u_char tcp_data_offset;
+        tcp_data_offset = transport_hdr[12]; // O campo data offset é 13o. byte do cabeçalho tcp
+        dns_msg_start = (u_char*)(packet + SIZE_ETHERNET + size_ip + tcp_data_offset + DNS_HEADER_SIZE_IN_BYTES);
+    }
     
-    udp = (struct udphdr*)(packet + SIZE_ETHERNET + size_ip);
-    
-    dns_msg_start = (u_char*)(packet + SIZE_ETHERNET + size_ip + sizeof(struct udphdr) + DNS_HEADER_SIZE_IN_BYTES);
     get_dns_domain_in_query(dns_msg_start, dns_qname);
     
     if (!strcmp(requisition, dns_qname)) {
         printf("**************************************************************************************************\n");    
         printf("O host %s fez uma requisição a %s\n", inet_ntoa(ip_hdr->ip_src), dns_qname);
-        printf("Resta responder o requisitante (MAC %s; IP %s; porta udp 0x%x;) dizendo que o host requisitado está no ip %s\n", (char*)ether_ntoa(ethernet->ether_shost), inet_ntoa(ip_hdr->ip_src), udp->uh_sport, ip);
+        printf("Resta responder o requisitante (MAC %s; IP %s; porta %d;) dizendo que o host requisitado está no ip %s\n", (char*)ether_ntoa(ethernet->ether_shost), inet_ntoa(ip_hdr->ip_src), source_port, ip);
     }
     return;    
 }
