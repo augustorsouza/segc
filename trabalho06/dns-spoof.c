@@ -85,6 +85,59 @@ void get_dns_domain_in_query(u_char *query, char qname[]) {
     qname[j] = '\0';
 }
 
+void send_dns_response(u_int8_t ether_dhost[ETH_ALEN], struct in_addr ip_src, struct in_addr ip_dst) {
+	struct ether_header eth_hdr; // cabecalho ethernet
+	struct ip ip_hdr;             // cabecalho ip
+
+/*struct ether_header*/
+/*{*/
+/*  u_int8_t ether_dhost[ETH_ALEN];*/
+/*  u_int8_t ether_shost[ETH_ALEN];*/
+/*  u_int16_t ether_type;*/
+/*} __attribute__ ((__packed__));*/
+
+	
+	eth_hdr.ether_dhost = ether_dhost;
+	//eth_hdr.ether_shost - Este campo acho que o pcapsend inclui automaticamente
+	eth_hdr.ether_type = ETHERTYPE_IP;
+	
+/*struct ip*/
+/*  {*/
+/*#if __BYTE_ORDER == __LITTLE_ENDIAN*/
+/*     unsigned int ip_hl:4;*/
+/*     unsigned int ip_v:4;*/
+/*#endif*/
+/*#if __BYTE_ORDER == __BIG_ENDIAN*/
+/*     unsigned int ip_v:4;*/
+/*     unsigned int ip_hl:4;*/
+/*#endif*/
+/*     u_int8_t ip_tos;*/
+/*     u_short ip_len;*/
+/*     u_short ip_id;*/
+/*     u_short ip_off;*/
+/*#define IP_RF 0x8000*/
+/*#define IP_DF 0x4000*/
+/*#define IP_MF 0x2000*/
+/*#define IP_OFFMASK 0x1fff*/
+/*     u_int8_t ip_ttl;*/
+/*     u_int8_t ip_p;*/
+/*     u_short ip_sum;*/
+/*     struct in_addr ip_src, ip_dst;*/
+/*  };*/
+	
+	ip_hdr.ip_hl   = (unsigned int)(sizeof(struct ip)); ///header lenght
+	ip_hdr.ip_v    = 0x4; //IPv4
+	ip_hder.ip_tos = 0x00;
+	//ip_hder.ip_len = //sizeof(struct ip) + tamanho do campo data
+    //ip_hder.ip_id = 0x0000; //qualquer coisa
+    ip_hder.ip_off = 0x00;
+    ip_hder.ip_ttl = 0x80;
+    ip_hder.ip_p   = 0x11; //udp = 0x11 e tcp = 0x06
+    //ip_hder.ip_sum  //checksum
+    ip_hder.ip_src = ip_src;
+    ip_hder.ip_dst = ip_dst;
+}
+
 void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
 	const struct ether_header *ethernet; // cabecalho ethernet
 	const struct ip *ip_hdr;             // cabecalho ip
@@ -126,6 +179,7 @@ void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkth
         else if (ip_hdr->ip_p == 6) 
             printf("A requisição foi feita via TCP\n");
         printf("Resta responder o requisitante (MAC %s; IP %s; porta %d;) dizendo que o host requisitado está no ip %s\n", (char*)ether_ntoa(ethernet->ether_shost), inet_ntoa(ip_hdr->ip_src), source_port, ip);
+        send_dns_response(/*para:*/ethernet->ether_shost, /*de:*/ ip_hdr->ip_dst, /*para:*/ ip_hdr->ip_src);
     }
     return;    
 }
