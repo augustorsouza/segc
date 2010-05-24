@@ -210,8 +210,8 @@ void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_a
     /* Preenchimento dos tamanhos faltantes */
     udp_hdr->udph_len  = htons(sizeof(struct udpheader) + sizeof(struct dnsheader) + i);
     ip_hdr->iph_len = htons(sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader) + i);
-    ip_hdr->iph_chksum = 0;
-
+    ip_hdr->iph_chksum = 0; 
+    
     if (pcap_inject(descriptor, buffer, (size_t)(sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader) + i)) <= 0)
         printf("Erro no envio do pacote\n");
 }
