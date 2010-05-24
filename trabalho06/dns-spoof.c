@@ -136,15 +136,6 @@ void get_dns_domain_in_query(u_char *query, char qname[]) {
     qname[j] = '\0';
 }
 
-unsigned short csum(unsigned short *buf, int nwords) {
-    unsigned long sum;
-    for(sum=0; nwords>0; nwords--)
-        sum += *buf++;
-    sum = (sum >> 16) + (sum &0xffff);
-    sum += (sum >> 16);
-    return (unsigned short)(~sum);
-}
-
 /* Esta função seria responsavel pela montagem e envio da resposta do DNS, porém não foi implementada corretamente por falta de tempo.
    Sua chamada está comentada dentro da função process_dns_packet_callback. Conseguimos montar um pacote UDP até o nivel do header DNS
    Ficou faltando o campo Data do DNS (contendo a 'answer') e a chamada a função pcap_sendpacket para enviar de fato o pacote. Alem disso,
@@ -170,30 +161,28 @@ void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_a
     /* IP */    	    
 	ip_hdr->iph_version_and_header_len = 0x45; //ipv4 e header lenght = 20 bytes
 	ip_hdr->iph_tos = 0x00;
-	//ip_hdr->ip_len = //sizeof(struct ip) + tamanho do campo data
     ip_hdr->iph_ident  = htons(54321);
     ip_hdr->iph_flag_and_offset = 0;
     ip_hdr->iph_ttl = 0x80;
     ip_hdr->iph_protocol   = 0x11; //udp = 0x11 e tcp = 0x06
-    //ip_hdr->iph_chksum = 0; //checksum
     ip_hdr->iph_sourceip = ip_src.s_addr;
     ip_hdr->iph_destip = ip_dst.s_addr;
     
     /* UDP */
     udp_hdr->udph_srcport = htons(53); //dns port
     udp_hdr->udph_destport = htons(port_dst);
-    //udp->udph_len = htons(sizeof(struct udpheader)); //header+data
+    udp_hdr->udph_chksum = htons(0);
     
     /* DNS Header */
-    dns_hdr->id = dns_id;   
-    dns_hdr->flags_and_codes = htons(0x8780); //qr=1; opcode=0000; aa=1; tc=1; rd=1; ra=1; zero=000; rcode=0000;
+    dns_hdr->id = htons(dns_id);   
+    dns_hdr->flags_and_codes = htons(0x8000); //qr=1; opcode=0000; aa=0; tc=0; rd=0; ra=0; zero=000; rcode=0000;
     dns_hdr->qdcount = htons(1);
     dns_hdr->ancount = htons(1);
     dns_hdr->nscount = htons(0);
     dns_hdr->arcount = htons(0);  
     
     /* DNS Data*/
-    dns_data = (char*)(buffer + sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader));
+    dns_data = (char*)(buffer + sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader));
     
     i = 0;
     while (dns_msg[i] != 0x00) {
@@ -207,7 +196,7 @@ void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_a
     dns_data[i++] = 0xC0; dns_data[i++] = 0x0C; //NAME = 12 bytes de offset
     dns_data[i++] = 0x00; dns_data[i++] = 0x01; //TYPE = A (host adress)
     dns_data[i++] = 0x00; dns_data[i++] = 0x01; //CLASS = IN
-    dns_data[i++] = 0x00; dns_data[i++] = 0x04; dns_data[i++] = 0xB0; //TTL = 20 minutos
+    dns_data[i++] = 0x00; dns_data[i++] = 0x00; dns_data[i++] = 0x04; dns_data[i++] = 0xB0; //TTL = 20 minutos
     dns_data[i++] = 0x00; dns_data[i++] = 0x04; //Data lenght = 4 bytes
     
     /* Adrr. do answer do DNS */
@@ -219,20 +208,12 @@ void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_a
     i = i + 4;
     
     /* Preenchimento dos tamanhos faltantes */
-    udp_hdr->udph_len  = htons(sizeof(struct udpheader) + i);
-    ip_hdr->iph_len = htons(sizeof(struct ipheader) + udp_hdr->udph_len);
-    
-    ip_hdr->iph_chksum = csum((unsigned short *)(buffer + sizeof(struct ether_header)), sizeof(struct ipheader));   
-     
-    if (pcap_inject(descriptor, buffer, (size_t)(sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader) + i)) <= 0)
-        printf("Erro no envio do pacote\n");
+    udp_hdr->udph_len  = htons(sizeof(struct udpheader) + sizeof(struct dnsheader) + i);
+    ip_hdr->iph_len = htons(sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader) + i);
+    ip_hdr->iph_chksum = 0;
 
-    for(j = sizeof(struct ether_header) + sizeof(struct ipheader); j < sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader); j++) {
-        printf("0x%x ", buffer[j]);
-        if (j == 30)
-            printf("\n");
-    }
-    printf("\n");
+    if (pcap_inject(descriptor, buffer, (size_t)(sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader) + i)) <= 0)
+        printf("Erro no envio do pacote\n");
 }
 
 /* Callback para processar o pacote recebido */
