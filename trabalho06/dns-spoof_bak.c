@@ -136,15 +136,17 @@ void get_dns_domain_in_query(u_char *query, char qname[]) {
     qname[j] = '\0';
 }
 
-/* Montagem e envio do pacote DNS de resposta */
-void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_addr ip_src, struct in_addr ip_dst, u_int16_t port_dst, u_int16_t dns_id, u_char *dns_msg,  u_int16_t seq_num,  u_int16_t ack_num) {
+/* Esta função seria responsavel pela montagem e envio da resposta do DNS, porém não foi implementada corretamente por falta de tempo.
+   Sua chamada está comentada dentro da função process_dns_packet_callback. Conseguimos montar um pacote UDP até o nivel do header DNS
+   Ficou faltando o campo Data do DNS (contendo a 'answer') e a chamada a função pcap_sendpacket para enviar de fato o pacote. Alem disso,
+   precisariamos tratar uma requisição via TCP */
+void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_addr ip_src, struct in_addr ip_dst, u_int16_t port_dst, u_int16_t dns_id, u_char *dns_msg) {
     u_char buffer[MAX_PACKET_SIZE];
     u_char *dns_data;
 
 	struct ether_header *eth_hdr = (struct ether_header *)(buffer); // cabecalho ethernet
 	struct ipheader *ip_hdr      = (struct ipheader *)(buffer + sizeof(struct ether_header)); // cabecalho ip
 	struct udpheader *udp_hdr    = (struct udpheader *)(buffer + sizeof(struct ether_header) + sizeof(struct ipheader));       // cabecalho udp
-	struct tcpheader *tcp_hdr    = (struct tcpheader *)(buffer + sizeof(struct ether_header) + sizeof(struct ipheader));       // cabecalho tcp
 	struct dnsheader *dns_hdr    = (struct dnsheader *)(buffer + sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader));       // cabecalho dns
 
     int i, j;
@@ -170,16 +172,6 @@ void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_a
     udp_hdr->udph_srcport = htons(53); //dns port
     udp_hdr->udph_destport = htons(port_dst);
     udp_hdr->udph_chksum = htons(0);
-
-    /* TCP */
-    tcp_hdr->th_sport = htons(53); //dns port
-    tcp_hdr->th_dport = htons(port_dst);
-    tcp_hdr->th_sum = htons(0); // checksum
-    tcp_hdr->th_win = 65535; // max window
-    tcp_hdr->th_flags = 0x18; 
-    tcp_hdr->th_urp = 0x0000; 
-    tcp_hdr->th_seq = seq_num;
-    tcp_hdr->th_ack = ack_num + 1;
     
     /* DNS Header */
     dns_hdr->id = htons(dns_id);   
@@ -190,10 +182,7 @@ void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_a
     dns_hdr->arcount = htons(0);  
     
     /* DNS Data*/
-    if (seq_num == 0 && ack_num == 0) // udp case ; most common
-    	dns_data = (char*)(buffer + sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader));
-    else // tcp case
-    	dns_data = (char*)(buffer + sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct tcpheader) + sizeof(struct dnsheader));
+    dns_data = (char*)(buffer + sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader));
     
     i = 0;
     while (dns_msg[i] != 0x00) {
@@ -218,22 +207,13 @@ void send_dns_response(u_int8_t *ether_shost, u_int8_t *ether_dhost, struct in_a
     
     i = i + 4;
     
-    /* Preenchimento dos tamanhos restantes */
+    /* Preenchimento dos tamanhos faltantes */
     udp_hdr->udph_len  = htons(sizeof(struct udpheader) + sizeof(struct dnsheader) + i);
     ip_hdr->iph_len = htons(sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader) + i);
     ip_hdr->iph_chksum = 0; 
-
-    if (seq_num == 0 && ack_num == 0) // udp case ; most common
-    {
-	if (pcap_inject(descriptor, buffer, (size_t)(sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct 	dnsheader) + i)) <= 0)
-	        printf("Erro no envio do pacote\n");
-    }
-    else // tcp case
-    {
-	if (pcap_inject(descriptor, buffer, (size_t)(sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct tcpheader) + sizeof(struct 	dnsheader) + i)) <= 0)	
-	        printf("Erro no envio do pacote\n");
-    }
-  
+    
+    if (pcap_inject(descriptor, buffer, (size_t)(sizeof(struct ether_header) + sizeof(struct ipheader) + sizeof(struct udpheader) + sizeof(struct dnsheader) + i)) <= 0)
+        printf("Erro no envio do pacote\n");
 }
 
 /* Callback para processar o pacote recebido */
@@ -246,9 +226,6 @@ void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkth
 	u_char *dns_msg_start;
 	char dns_qname[MAX_SIZE];
     u_int16_t source_port;
-    // lbarbosa
-    u_int16_t seq_number = 0;
-    u_int16_t ack_number = 0;
     
 	ethernet = (struct ether_header*)(packet);
     ip_hdr = (struct ip*)(packet + SIZE_ETHERNET);
@@ -272,16 +249,14 @@ void process_dns_packet_callback(u_char *useless, const struct pcap_pkthdr *pkth
         tcp_data_offset = transport_hdr[12]; // O campo data offset é 13o. byte do cabeçalho tcp (tamanho do cabeçalho tcp)
         dns_hdr = (struct dnsheader*)(packet + SIZE_ETHERNET + size_ip + tcp_data_offset);
         dns_msg_start = (u_char*)(packet + SIZE_ETHERNET + size_ip + tcp_data_offset + DNS_HEADER_SIZE_IN_BYTES);
-	// lbarbosa ; tcp_case
-        seq_number = (((u_int16_t)transport_hdr[1] << 8 & 0xFF00) + (u_int16_t)transport_hdr[2] ) ; 
-        ack_number = (((u_int16_t)transport_hdr[2] << 8 & 0xFF00) + (u_int16_t)transport_hdr[3] ) ; 
     }
     
     get_dns_domain_in_query(dns_msg_start, dns_qname);
     
     if (!strcmp(requisition, dns_qname)) {
         printf("O host %s fez uma requisição a %s\n", inet_ntoa(ip_hdr->ip_src), dns_qname);
-        send_dns_response(/*de:*/(u_int8_t *)ethernet->ether_dhost, /*para:*/(u_int8_t *)ethernet->ether_shost, /*de:*/ ip_hdr->ip_dst, /*para:*/ ip_hdr->ip_src, /*de:*/source_port, dns_hdr->id, dns_msg_start, seq_number, ack_number); // lbarbosa
+        //printf("Resta responder o requisitante (MAC %s; IP %s; porta %d;) dizendo que o host requisitado está no ip %s\n", (char*)ether_ntoa(ethernet->ether_shost), inet_ntoa(ip_hdr->ip_src), source_port, ip);
+        send_dns_response(/*de:*/(u_int8_t *)ethernet->ether_dhost, /*para:*/(u_int8_t *)ethernet->ether_shost, /*de:*/ ip_hdr->ip_dst, /*para:*/ ip_hdr->ip_src, /*de:*/source_port, dns_hdr->id, dns_msg_start);
     }
     return;    
 }
